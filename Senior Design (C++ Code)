@@ -1,0 +1,297 @@
+/* Note:
+ Not all pins on the Mega and Mega 2560 support change interrupts,
+ so only the following can be used for RX:
+ 10, 11, 12, 13, 50, 51, 52, 53, 62, 63, 64, 65, 66, 67, 68, 69
+ */
+#include "FastLED.h" 
+#define FPlayBinCount 0
+#include <Adafruit_NeoPixel.h>
+#include <FPlayArduino.h>
+   
+int wait = 20;
+const int BluePin = 2;     // the number of the pushbutton pin 
+const int BlackPin = 3;
+   
+
+#define VIBRATION_PIN 8 //Vibration Switch  
+
+
+// Fixed definitions cannot change on the fly.
+#define LED_DT 7                                             // Serial data pin for WS2812B or WS2801
+#define COLOR_ORDER GRB                                       // Are they RGB, GRB or what??
+#define LED_TYPE WS2812B                                       // What kind of strip are you using?
+#define NUM_LEDS 25                                          // Number of LED's
+ 
+// Initialize changeable global variables.
+uint8_t max_bright = 255;                                     // Overall brightness definition. It can be changed on the fly.
+ 
+struct CRGB leds[NUM_LEDS];                                   // Initialize our LED array.
+ 
+ 
+#define MIC_PIN 2                                            // Analog port for microphone
+ 
+#define DC_OFFSET  0                                         // DC offset in mic signal - if unusure, leave 0
+                                                              // I calculated this value by serialprintln lots of mic values
+#define NOISE     100                                         // Noise/hum/interference in mic signal and increased value until it went quiet
+#define SAMPLES   60                                          // Length of buffer for dynamic level adjustment
+#define TOP (NUM_LEDS + 2)                                    // Allow dot to go slightly off scale
+#define PEAK_FALL 10                                          // Rate of peak falling dot
+ 
+byte
+  peak      = 0,                                              // Used for falling dot
+  dotCount  = 0,                                              // Frame counter for delaying dot-falling speed
+  volCount  = 0;                                              // Frame counter for storing past volume data
+int
+  vol[SAMPLES],                                               // Collection of prior volume samples
+  lvl       = 10,                                             // Current "dampened" audio level
+  minLvlAvg = 0,                                              // For dynamic adjustment of graph low & high
+  maxLvlAvg = 512;
+ 
+Adafruit_NeoPixel strip = Adafruit_NeoPixel(NUM_LEDS, LED_DT, NEO_GRB + NEO_KHZ800);
+class Detector
+{
+  int forcePin;
+  int forceBag;
+  
+  long OnTime;
+  long OffTime;
+  
+  int val = 0;
+  int valbag = 0;
+  int forceState;
+
+  unsigned long previousMillis;
+
+  // Constructor - creates a Detector
+  public:
+  Detector(int pin,  long on, long off)
+{
+  forcePin = pin;
+  previousMillis = 0;
+  forceState = LOW;
+}
+  void Update()
+  {
+    unsigned long currentMillis = millis();
+     
+    if((forceState == HIGH) && (currentMillis - previousMillis >= OnTime))
+    {
+    val = analogRead(forcePin);
+    Serial.println(val,DEC);    
+    if (val>900){                 //if the value is maxed out or greater than 250
+ 
+  colorWipe(strip.Color(0, 0, 255), 50); // Blue
+   strip.show();
+  }
+
+
+  else if (val>=250 && val<=899){    //if value is between 176 and 699
+    
+   colorWipe(strip.Color(0, 255, 0), 50); // Green
+    strip.show();
+  }
+  else if (val>=0 && val<=249){
+   FPlay.play();  
+   colorWipe(strip.Color(255,0,0),50); //Red
+  }
+ 
+
+      forceState = LOW;
+      previousMillis = currentMillis;
+      
+    }
+    else if ((forceState == LOW) && (currentMillis - previousMillis >= OffTime))
+    {
+      forceState = HIGH;
+      previousMillis = currentMillis;
+    
+    }
+  }
+};
+
+Detector forceBase( A0, 123, 400);
+Detector forceHandle( A1, 350, 350);
+
+int RFIDResetPin = 13;
+int BlueState = 0;
+int BlackState = 0;
+//Register your RFID tags here
+char tag1[13] = "7A009298CEBE";
+char tag2[13] = "190023AF2CB9";
+char tag3[13] = "7A0092C31B30";
+char tag4[13] = "7A0092C41834";
+char tag5[13] = "0800D9E3F7C5";
+                                   
+//--------------------------------------------------------------------------------------------------------------------------------------------------------------
+
+void setup() {
+ FPlay.begin(9600);
+ //----------------------------------------------------
+  pinMode(RFIDResetPin, OUTPUT);
+  digitalWrite(RFIDResetPin, HIGH);
+
+  //ONLY NEEDED IF CONTROLING THESE PINS - EG. LEDs
+
+  pinMode(5, OUTPUT);
+  pinMode(6, OUTPUT);
+  //---------------------------------------------------
+  
+  LEDS.addLeds<LED_TYPE, LED_DT, COLOR_ORDER>(leds, NUM_LEDS);
+  FastLED.setBrightness(max_bright);
+  set_max_power_in_volts_and_milliamps(5, 500);               // FastLED 2.1 Power management set at 5V, 500mA
+ 
+  // initialize the pushbutton pin as an input:
+  pinMode(BluePin, INPUT);
+
+  pinMode(BlackPin, INPUT);
+   
+pinMode(VIBRATION_PIN, INPUT);digitalWrite(VIBRATION_PIN, HIGH);
+ 
+}
+//--------------------------------------------------------------------------------------------------------------------------------------------------------------
+//--------------------------------------------------------------------------------------------------------------------------------------------------------------
+//--------------------------------------------------------------------------------------------------------------------------------------------------------------
+
+void loop() {
+  FPlay.process();
+  show_at_max_brightness_for_power();   
+       char tagString[13];
+  int index = 0;
+  boolean reading = false;
+
+  while(Serial.available()){
+
+    int readByte = Serial.read(); //read next available byte
+
+    if(readByte == 2) reading = true; //begining of tag
+    if(readByte == 3) reading = false; //end of tag
+
+    if(reading && readByte != 2 && readByte != 10 && readByte != 13){
+      //store the tag
+      tagString[index] = readByte;
+      index ++;
+    }
+  }
+
+  clearTag(tagString); //Clear the char of all value
+  resetReader(); //reset the RFID reader
+  checkTag(tagString);
+
+ //----------------------------------------------------------------------------------------------------------------------------------------------------------------
+ // Check the vibration sensor:
+ //----------------------------------------------------------------------------------------------------------------------------------------------------------------
+  if (!digitalRead(VIBRATION_PIN)) {
+    
+  }
+//------------------------------------------------------------------------------------------------------------------ 
+BlackState = digitalRead(BlackPin); 
+if ( BlackState == HIGH){
+
+}
+//-------- Blue Metal PushButton----------------------------------------------------------------------------------------
+  // read the state of the pushbutton value:
+  BlueState = digitalRead(BluePin);
+
+  // check if the pushbutton is pressed.
+  // if it is, the buttonState is HIGH:
+  if (BlueState == HIGH) {
+    forceBase.Update();    // Check the Force at the Base
+    forceHandle.Update(); // Check the Force at the Handle 
+ 
+    }else{
+  }
+}
+//-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+//----------------------------------------OUTSIDE OF LOOP------------------------------------------------------------------------------------------
+//-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+
+void lightLED(int pin){
+///////////////////////////////////
+//Turn on LED on pin "pin" for 250ms
+///////////////////////////////////
+  Serial.println(pin);
+  digitalWrite(pin, HIGH);
+  delay(250);
+  digitalWrite(pin, LOW);
+}
+
+void checkTag(char tag[]){
+///////////////////////////////////
+//Check the read tag against known tags
+///////////////////////////////////
+
+ if(compareTag(tag, tag4)){
+  
+  lightLED(5);
+    
+  }else if(!compareTag(tag, tag4)){
+    lightLED(6);
+  }else{
+  
+    Serial.println(tag);
+  }
+
+}
+
+void resetReader(){
+///////////////////////////////////
+//Reset the RFID reader to read again.
+///////////////////////////////////
+  digitalWrite(RFIDResetPin, LOW);
+  digitalWrite(RFIDResetPin, HIGH);
+  delay(150);
+}
+
+void clearTag(char one[]){
+///////////////////////////////////
+//clear the char array by filling with null - ASCII 0
+//Will think same tag has been read otherwise
+///////////////////////////////////
+  for(int i = 0; i < strlen(one); i++){
+    one[i] = 0;
+  }
+}
+
+boolean compareTag(char one[], char two[]){
+///////////////////////////////////
+//compare two value to see if same,
+//strcmp not working 100% so we do this
+///////////////////////////////////
+
+  if(strlen(one) == 0) return false; //empty
+
+  for(int i = 0; i < 12; i++){
+    if(one[i] != two[i]) return false;
+  }
+
+  return true; //no mismatches
+}
+
+
+//------------------------------------------------------------------
+
+// Fill the dots one after the other with a color
+void colorWipe(uint32_t c, uint8_t wait) {
+  for(uint16_t i=0; i<strip.numPixels(); i++) {
+      strip.setPixelColor(i, c);
+      strip.show();
+      delay(wait);
+  }
+}
+
+
+// Input a value 0 to 255 to get a color value.
+// The colours are a transition r - g - b - back to r.
+uint32_t Wheel(byte WheelPos) {
+  if(WheelPos < 85) {
+    return strip.Color(WheelPos * 3, 255 - WheelPos * 3, 0);
+  } 
+  else if(WheelPos < 170) {
+    WheelPos -= 85;
+    return strip.Color(255 - WheelPos * 3, 0, WheelPos * 3);
+  } 
+  else {
+    WheelPos -= 170;
+    return strip.Color(0, WheelPos * 3, 255 - WheelPos * 3);
+  }
+}
